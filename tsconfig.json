@@ -7,7 +7,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "allowJs": true // (기존 JS 파일 호환)
+  "allowJs": true // (既存の JS ファイルとの互換性)
   },
   "include": ["src/**/*"]
 }

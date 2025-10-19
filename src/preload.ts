@@ -1,52 +1,52 @@
 // src/preload.ts
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
-// 구 프로젝트의 설정을 위한 타입
+// 旧プロジェクトの設定用の型
 type SettingsData = {
   interval?: number;
-  resolution?: number | string; // 구 프로젝트는 string도 가능했음
+  resolution?: number | string; // 旧プロジェクトでは string も可能だった
   deleteAfterUpload?: boolean;
-  // (statusText, isRecording은 UI 상태이므로 여기서 제외)
+  // (statusText, isRecording は UI 状態なのでここでは除外)
 };
 
-// 통계 데이터 타입
+// 統計データの型
 type StatsData = {
-  totalShots: number; // screenshot/ 폴더 내 .png 개수
-  totalSize: number;  // screenshot/ 폴더 내 .png 총 크기 (bytes)
-  uploadedCount: number; // screenshot/uploaded/ 폴더 내 .png 개수 (구: deletedCount)
+  totalShots: number; // screenshot/ フォルダ内の .png の数
+  totalSize: number;  // screenshot/ フォルダ内の .png 総サイズ (bytes)
+  uploadedCount: number; // screenshot/uploaded/ フォルダ内の .png の数 (旧: deletedCount)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // --- 기존 함수 ---
+  // --- 既存の関数 ---
   startCapture: (settings: { interval: number; resolution: number }) =>
     ipcRenderer.invoke('start-capture', settings),
   stopCapture: () =>
     ipcRenderer.invoke('stop-capture'),
 
-  // --- 👇 [추가] ---
+  // --- 👇 [追加] ---
 
-  // 설정 읽기
+  // 設定の読み取り
   readSettings: (): Promise<SettingsData> => ipcRenderer.invoke('settings:read'),
 
-  // 설정 쓰기
+  // 設定の書き込み
   writeSettings: (settings: SettingsData): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('settings:write', settings),
 
-  // 통계 가져오기
+  // 統計の取得
   getStats: (): Promise<StatsData> => ipcRenderer.invoke('stats:get'),
 
-  // 최근 스크린샷 목록 (Data URL 배열) 가져오기
+  // 最近のスクリーンショット一覧 (Data URL 配列) を取得
   listScreenshots: (limit?: number): Promise<string[]> => ipcRenderer.invoke('screenshots:list', limit),
 
-  // 창 닫기
+  // ウィンドウを閉じる
   closeWindow: (): Promise<void> => ipcRenderer.invoke('window:close'),
 
-  // Main 프로세스로부터 로그 메시지를 받을 리스너 등록
-  // 사용법: window.electronAPI.onLogMessage((message) => { console.log(message); });
-  onLogMessage: (callback: (message: string) => void) => {
-    const listener = (event, message) => callback(message);
-    ipcRenderer.on('log-message', listener);
-    // 클린업 함수 반환
-    return () => ipcRenderer.removeListener('log-message', listener);
-  },
+  // Main プロセスからログメッセージを受け取るリスナー登録
+  // 使い方: window.electronAPI.onLogMessage((message) => { console.log(message); });
+    onLogMessage: (callback: (message: string) => void) => {
+      const listener = (event: IpcRendererEvent, message: string) => callback(message);
+      ipcRenderer.on('log-message', listener);
+      // クリンアップ関数を返す (타입 일치 유지)
+      return () => ipcRenderer.removeListener('log-message', listener as (...args: any[]) => void);
+    },
 });

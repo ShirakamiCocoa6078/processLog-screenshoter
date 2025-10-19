@@ -2,45 +2,54 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import fsp from 'fs/promises'; // Async 파일 시스템 API
+import fsp from 'fs/promises'; // Async ファイルシステム API
 import { ChildProcess, spawn } from 'child_process';
 import axios from 'axios';
 
-// Squirrel 업데이트 핸들러 (Windows 설치용)
+// Squirrel アップデートハンドラ (Windows インストーラ用)
 if (require('electron-squirrel-startup')) {
   app.quit();
 }
 
-// Webpack이 주입하는 전역 변수
+// Webpack が注入するグローバル変数
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
-// --- 전역 변수 및 경로 정의 ---
+// --- グローバル変数とパス定義 ---
 const isDev = !app.isPackaged;
 const resourcesPath = isDev
-  ? path.join(__dirname, '../../') // 개발: 프로젝트 루트
-  : process.resourcesPath;         // 배포: resources 폴더
+  ? path.join(__dirname, '../../') // 開発: プロジェクトルート
+  : process.resourcesPath;         // 配布: resources フォルダ
 
-// 1. Python 자식 프로세스 참조 변수
+// 1. Python 子プロセス参照変数
 let appPy: ChildProcess | null = null;
 let uploaderPy: ChildProcess | null = null;
-let mainWindowRef: BrowserWindow | null = null; // mainWindow 참조 저장
+let mainWindowRef: BrowserWindow | null = null; // mainWindow 参照を保存
 
-// 2. Python 스크립트 실행 경로
-const pythonPath = isDev ? 'python' : path.join(resourcesPath, 'venv', 'python.exe'); // (배포 시 venv 경로)
+// 에러에서 메시지를 안전하게 추출하는 헬퍼
+const getErrorMessage = (err: unknown): string => {
+  if (axios.isAxiosError(err)) {
+    return err.message;
+  }
+  if (err instanceof Error) return err.message;
+  try { return String(err); } catch { return 'Unknown error'; }
+};
+
+// 2. Python スクリプト実行パス
+const pythonPath = isDev ? 'python' : path.join(resourcesPath, 'venv', 'python.exe'); // (配布時の venv パス)
 const appPyPath = path.join(resourcesPath, 'backend', 'app.py');
 const uploaderPyPath = path.join(resourcesPath, 'backend', 'uploader.py');
 
-// 3. UI 로드 URL 및 API
+// 3. UI ロード URL と API
 const UI_URL = 'https://process-log.vercel.app';
 const LOCAL_FLASK_API = 'http://localhost:5001';
 
-// 4. 파일 및 폴더 이름
+// 4. ファイルとフォルダ名
 const SETTINGS_FILE_NAME = 'user-settings.json';
 const SCREENSHOT_FOLDER = 'screenshot';
 const UPLOADED_SUBFOLDER = 'uploaded';
 
-// 5. [수정] 동적 경로 정의
-// 사용자 데이터 폴더 내 설정 파일 경로 (app.getPath 사용 보장)
+// 5. [修正] 動的パス定義
+// ユーザーデータフォルダ内の設定ファイルパス (app.getPath を使用)
 const userSettingsPath = path.join(app.getPath('userData'), SETTINGS_FILE_NAME);
 // 프로젝트 루트 내 스크린샷 폴더 경로
 const screenshotPath = path.join(resourcesPath, SCREENSHOT_FOLDER);
@@ -49,8 +58,8 @@ const uploadedPath = path.join(screenshotPath, UPLOADED_SUBFOLDER);
 const uploaderConfigPath = path.join(resourcesPath, 'uploader_config.json'); // CONFIG_FILE_PATH -> uploaderConfigPath
 
 const defaultSettings = {
-  interval: 5,         // 초 단위
-  resolution: '1.0',   // 문자열
+  interval: 5,         // 秒単位
+  resolution: '1.0',   // 文字列
   deleteAfterUpload: false,
 };
 
@@ -60,7 +69,7 @@ const sendLogToUI = (message: string) => {
   if (mainWindowRef && !mainWindowRef.isDestroyed()) {
     mainWindowRef.webContents.send('log-message', `[${new Date().toLocaleTimeString()}] ${message}`);
   }
-  console.log(`[LOG] ${message}`); // 메인 프로세스 콘솔에도 출력
+  console.log(`[LOG] ${message}`); // メインプロセスのコンソールにも出力
 };
 
 // [추가] 설정을 읽는 별도 함수
@@ -72,7 +81,7 @@ async function readSettings(): Promise<typeof defaultSettings> {
       return { ...defaultSettings, ...JSON.parse(content) };
     }
   } catch (error) {
-    sendLogToUI(`[오류] 설정 파일 읽기 실패: ${error.message}`);
+    sendLogToUI(`[エラー] 設定ファイルの読み込みに失敗しました: ${getErrorMessage(error)}`);
   }
   return defaultSettings; // 실패 시 기본값 반환
 }
@@ -87,20 +96,20 @@ const createWindow = (): void => {
     },
   });
   mainWindowRef = mainWindow;
-  // Vercel 앱 로드
+  // Vercel アプリをロード
   mainWindow.loadURL(UI_URL);
 
-  // (선택) 개발자 도구 열기
+  // (任意) 開発者ツールを開く
   if (isDev) {
     mainWindow.webContents.openDevTools();
   }
 };
 
-// --- Python 프로세스 관리 ---
+// --- Python プロセス管理 ---
 
-// Python 프로세스 실행
+// Python プロセスを実行
 const startPythonProcesses = () => {
-  sendLogToUI('Starting Python processes...');
+  sendLogToUI('Python プロセスを開始しています...');
   // console.log('App.py Path:', appPyPath);
   // console.log('Uploader.py Path:', uploaderPyPath);
 
@@ -109,27 +118,27 @@ const startPythonProcesses = () => {
     appPy = spawn(pythonPath, [appPyPath]);
 
     if (appPy) {
-      appPy.stdout.on('data', (data) => sendLogToUI(`[App.py]: ${data.toString().trim()}`));
-      appPy.stderr.on('data', (data) => sendLogToUI(`[App.py ERR]: ${data.toString().trim()}`));
-      appPy.on('close', (code) => sendLogToUI(`App.py 종료됨 (코드: ${code})`));
-      appPy.on('error', (err) => sendLogToUI(`[App.py SPAWN ERR]: ${err.message}`)); // [추가] spawn 오류 처리
+      if (appPy.stdout) appPy.stdout.on('data', (data) => sendLogToUI(`[App.py]: ${data.toString().trim()}`));
+      if (appPy.stderr) appPy.stderr.on('data', (data) => sendLogToUI(`[App.py ERR]: ${data.toString().trim()}`));
+      appPy.on('close', (code) => sendLogToUI(`App.py 終了 (コード: ${code})`));
+      appPy.on('error', (err) => sendLogToUI(`[App.py SPAWN ERR]: ${getErrorMessage(err)}`)); // spawn エラー処理
     } else {
-      sendLogToUI('[오류] App.py 프로세스를 시작하지 못했습니다.');
+      sendLogToUI('[エラー] App.py プロセスを起動できませんでした。');
     }
 
     // (2) 업로더 (uploader.py) 실행
     uploaderPy = spawn(pythonPath, [uploaderPyPath]);
 
     if (uploaderPy) {
-      uploaderPy.stdout.on('data', (data) => sendLogToUI(`[Uploader.py]: ${data.toString().trim()}`));
-      uploaderPy.stderr.on('data', (data) => sendLogToUI(`[Uploader.py ERR]: ${data.toString().trim()}`));
-      uploaderPy.on('close', (code) => sendLogToUI(`Uploader.py 종료됨 (코드: ${code})`));
-      uploaderPy.on('error', (err) => sendLogToUI(`[Uploader.py SPAWN ERR]: ${err.message}`)); // [추가] spawn 오류 처리
+      if (uploaderPy.stdout) uploaderPy.stdout.on('data', (data) => sendLogToUI(`[Uploader.py]: ${data.toString().trim()}`));
+      if (uploaderPy.stderr) uploaderPy.stderr.on('data', (data) => sendLogToUI(`[Uploader.py ERR]: ${data.toString().trim()}`));
+      uploaderPy.on('close', (code) => sendLogToUI(`Uploader.py 終了 (コード: ${code})`));
+      uploaderPy.on('error', (err) => sendLogToUI(`[Uploader.py SPAWN ERR]: ${getErrorMessage(err)}`)); // spawn エラー処理
     } else {
-      sendLogToUI('[오류] Uploader.py 프로세스를 시작하지 못했습니다.');
+      sendLogToUI('[エラー] Uploader.py プロセスを起動できませんでした。');
     }
   } catch (error) { // [추가] spawn 자체 오류 처리
-      sendLogToUI(`[오류] Python 프로세스 spawn 실패: ${error.message}`);
+      sendLogToUI(`[エラー] Python プロセス spawn に失敗しました: ${getErrorMessage(error)}`);
       appPy = null; // 오류 발생 시 null로 확실히 설정
       uploaderPy = null;
   }
@@ -194,7 +203,7 @@ const setupAuthTokenListener = () => {
         updateUploaderConfig(null, null); // 초기화
       }
     } catch (error) { // [추가] 쿠키 읽기 오류 처리
-        sendLogToUI(`[오류] 초기 쿠키 확인 실패: ${error.message}`);
+    sendLogToUI(`[오류] 초기 쿠키 확인 실패: ${getErrorMessage(error)}`);
         updateUploaderConfig(null, null); // 오류 시에도 초기화
     }
   })();
@@ -268,8 +277,12 @@ ipcMain.handle('stop-capture', async () => {
     const response = await axios.post(`${LOCAL_FLASK_API}/stop`);
     return { success: true, message: response.data.message };
   } catch (error) {
-    console.error('[IPC Error] Stop Capture:', error.message);
-    return { success: false, message: error.response?.data?.message || error.message };
+    console.error('[IPC Error] Stop Capture:', getErrorMessage(error));
+    // axios error 일 경우 응답 메시지를 우선적으로 사용
+    if (axios.isAxiosError(error)) {
+      return { success: false, message: error.response?.data?.message || error.message };
+    }
+    return { success: false, message: getErrorMessage(error) };
   }
 });
 
@@ -296,16 +309,16 @@ ipcMain.handle('settings:write', async (event, settings) => {
              }
             const nextUploaderCfg = {...uploaderCfg, deleteAfterUpload: settings.deleteAfterUpload };
             await fsp.writeFile(uploaderConfigPath, JSON.stringify(nextUploaderCfg, null, 2), 'utf8'); // [수정] uploaderConfigPath 사용
-        } catch (e) {
-             sendLogToUI(`[오류] uploader_config.json 업데이트 실패: ${e.message}`);
-        }
+    } catch (e) {
+      sendLogToUI(`[오류] uploader_config.json 업데이트 실패: ${getErrorMessage(e)}`);
+    }
     }
 
     sendLogToUI('설정 저장됨.');
     return { success: true };
   } catch (error) {
-    sendLogToUI(`[오류] 설정 파일 쓰기 실패: ${error.message}`);
-    return { success: false, error: error.message };
+    sendLogToUI(`[오류] 설정 파일 쓰기 실패: ${getErrorMessage(error)}`);
+    return { success: false, error: getErrorMessage(error) };
   }
 });
 
@@ -348,7 +361,7 @@ ipcMain.handle('stats:get', async () => {
         sendLogToUI(`[정보] 업로드 폴더 없음: ${uploadedPath}`);
     }
   } catch (error) {
-    sendLogToUI(`[오류] 통계 계산 실패: ${error.message}`);
+    sendLogToUI(`[오류] 통계 계산 실패: ${getErrorMessage(error)}`);
   }
   return stats;
 });
@@ -389,7 +402,7 @@ ipcMain.handle('screenshots:list', async (event, limit = 4) => {
         sendLogToUI(`[정보] 스크린샷 폴더 없음 (목록): ${screenshotPath}`);
     }
   } catch (error) {
-    sendLogToUI(`[오류] 스크린샷 목록 생성 실패: ${error.message}`);
+    sendLogToUI(`[오류] 스크린샷 목록 생성 실패: ${getErrorMessage(error)}`);
   }
   return results;
 });
