@@ -10709,6 +10709,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 // src/index.ts
 const electron_1 = __webpack_require__(/*! electron */ "electron");
 const path_1 = __importDefault(__webpack_require__(/*! path */ "path"));
+const fs_1 = __importDefault(__webpack_require__(/*! fs */ "fs"));
 const child_process_1 = __webpack_require__(/*! child_process */ "child_process");
 const axios_1 = __importDefault(__webpack_require__(/*! axios */ "./node_modules/axios/dist/node/axios.cjs"));
 // Squirrel 업데이트 핸들러 (Windows 설치용)
@@ -10729,8 +10730,9 @@ const pythonPath = isDev ? 'python' : path_1.default.join(resourcesPath, 'venv',
 const appPyPath = path_1.default.join(resourcesPath, 'backend', 'app.py');
 const uploaderPyPath = path_1.default.join(resourcesPath, 'backend', 'uploader.py');
 // 3. UI 로드 URL (1단계에서 만든 Vercel 서버)
-const UI_URL = 'https://process-log.vercel.app'; // 👈 1단계에서 배포한 URL
-const LOCAL_FLASK_API = 'http://localhost:5001'; // 👈 2단계에서 만든 app.py 주소
+const UI_URL = 'https://process-log.vercel.app';
+const LOCAL_FLASK_API = 'http://localhost:5001';
+const CONFIG_FILE_PATH = path_1.default.join(resourcesPath, 'uploader_config.json');
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
         height: 800,
@@ -10768,8 +10770,58 @@ const killPythonProcesses = () => {
     if (uploaderPy)
         uploaderPy.kill();
 };
+const updateUploaderConfig = (token, email) => {
+    try {
+        const config = {
+            sessionToken: token,
+            userEmail: email,
+        };
+        fs_1.default.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(config, null, 2));
+        if (token) {
+            console.log('[Auth] uploader_config.json에 세션 토큰 저장 성공.');
+        }
+        else {
+            console.log('[Auth] 로그아웃. uploader_config.json 초기화.');
+        }
+    }
+    catch (error) {
+        console.error('[Auth] uploader_config.json 쓰기 실패:', error);
+    }
+};
+const setupAuthTokenListener = () => {
+    // Vercel 도메인에 대한 쿠키만 감시
+    const filter = { urls: [UI_URL + '/*'] };
+    electron_1.session.defaultSession.cookies.on('changed', async (event, cookie, cause, removed) => {
+        // 우리가 찾는 쿠키 이름
+        const AUTH_COOKIE_NAME = '__Secure-next-auth.session-token';
+        // (Vercel 배포 시 __Secure- 접두사가 붙습니다. 로컬 테스트 시 'next-auth.session-token')
+        if (cookie.name === AUTH_COOKIE_NAME || cookie.name === 'next-auth.session-token') {
+            if (removed || cause === 'expired') {
+                // 로그아웃 또는 만료
+                updateUploaderConfig(null, null);
+            }
+            else if (cause === 'explicit') {
+                // 로그인 성공 (쿠키 생성됨)
+                // (이메일은 현재 알 수 없으므로 null 또는 다른 IPC로 받아와야 함)
+                // (우선 토큰만 저장)
+                updateUploaderConfig(cookie.value, null);
+            }
+        }
+    });
+    (async () => {
+        const cookies = await electron_1.session.defaultSession.cookies.get({ url: UI_URL });
+        const authToken = cookies.find(c => c.name === AUTH_COOKIE_NAME || c.name === 'next-auth.session-token');
+        if (authToken) {
+            updateUploaderConfig(authToken.value, null);
+        }
+        else {
+            updateUploaderConfig(null, null); // 초기화
+        }
+    })();
+};
 // --- Electron App Lifecycle ---
 electron_1.app.on('ready', () => {
+    setupAuthTokenListener();
     startPythonProcesses(); // Python 먼저 실행
     createWindow(); // 그 다음 창 생성
 });
@@ -10806,11 +10858,6 @@ electron_1.ipcMain.handle('stop-capture', async () => {
         console.error('[IPC Error] Stop Capture:', error.message);
         return { success: false, message: error.response?.data?.message || error.message };
     }
-});
-// (4단계 연동) 인증 토큰을 Main 프로세스에 전달
-electron_1.ipcMain.on('set-auth-token', (event, token, email) => {
-    console.log('Auth Token 수신. uploader_config.json 업데이트...');
-    // TODO: 4단계에서 이 토큰을 uploader_config.json 파일에 저장하는 로직 구현
 });
 
 

@@ -62,7 +62,6 @@ def send_screenshots(filepaths, auth_token, user_email):
     # (참고: userEmail은 4단계 API 인증 구현 시 제거될 수 있습니다)
     json_payload = {
         "screenshots": payload_screenshots,
-        "userEmail": user_email 
     }
 
     # ★ 4단계에서 구현될 인증 헤더
@@ -72,7 +71,6 @@ def send_screenshots(filepaths, auth_token, user_email):
     }
 
     try:
-        # (★★ 4단계 전까지는 이 요청이 실패하는 것이 정상입니다 ★★)
         response = requests.post(VERCEL_API_URL, json=json_payload, headers=headers)
         
         if response.status_code == 200:
