@@ -16,7 +16,7 @@ declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 // --- 전역 변수 및 경로 정의 ---
 const isDev = !app.isPackaged;
-const resourcesPath = isDev 
+const resourcesPath = isDev
   ? path.join(__dirname, '../../') // 개발: 프로젝트 루트
   : process.resourcesPath;         // 배포: resources 폴더
 
