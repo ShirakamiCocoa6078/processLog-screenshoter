@@ -10788,8 +10788,8 @@ async function readSettings() {
 // --- createWindow 함수 ---
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
-        height: 900,
-        width: 1460,
+        //height: 900,
+        //width: 1460,
         webPreferences: {
             preload: 'C:\\Users\\ShirakamiCocoa\\Desktop\\JPHACKS_project\\processLog-screenshoter\\.webpack\\renderer\\main_window\\preload.js',
         },
@@ -10797,6 +10797,9 @@ const createWindow = () => {
     mainWindowRef = mainWindow;
     // Vercel アプリをロード
     mainWindow.loadURL(UI_URL);
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.maximize();
+    });
     // (任意) 開発者ツールを開く
     if (isDev) {
         mainWindow.webContents.openDevTools();

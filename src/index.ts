@@ -89,8 +89,8 @@ async function readSettings(): Promise<typeof defaultSettings> {
 // --- createWindow 함수 ---
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
-    height: 900,
-    width: 1460,
+    //height: 900,
+    //width: 1460,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
     },
@@ -98,7 +98,9 @@ const createWindow = (): void => {
   mainWindowRef = mainWindow;
   // Vercel アプリをロード
   mainWindow.loadURL(UI_URL);
-
+mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+});
   // (任意) 開発者ツールを開く
   if (isDev) {
     mainWindow.webContents.openDevTools();
