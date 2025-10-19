@@ -10860,14 +10860,14 @@ const updateUploaderConfig = (token, email) => {
         // [수정] uploaderConfigPath 사용
         fs_1.default.writeFileSync(uploaderConfigPath, JSON.stringify(config, null, 2));
         if (token) {
-            console.log('[Auth] uploader_config.json에 세션 토큰 저장 성공.');
+            console.log('[Auth] uploader_config.jsonにセッショントークンの保存に成功。');
         }
         else {
-            console.log('[Auth] 로그아웃. uploader_config.json 초기화.');
+            console.log('[Auth] ログアウト。uploader_config.jsonを初期化しました。');
         }
     }
     catch (error) {
-        console.error('[Auth] uploader_config.json 쓰기 실패:', error);
+        console.error('[Auth] uploader_config.jsonの書き込みに失敗しました:', error);
     }
 };
 const setupAuthTokenListener = () => {
@@ -10904,7 +10904,7 @@ const setupAuthTokenListener = () => {
             }
         }
         catch (error) { // [추가] 쿠키 읽기 오류 처리
-            sendLogToUI(`[오류] 초기 쿠키 확인 실패: ${getErrorMessage(error)}`);
+            sendLogToUI(`[エラー] 初期クッキー確認失敗:${getErrorMessage(error)}`);
             updateUploaderConfig(null, null); // 오류 시에도 초기화
         }
     })();
@@ -10933,33 +10933,33 @@ electron_1.app.on('activate', () => {
 // 캡처 시작 요청 (UI -> Main -> app.py)
 electron_1.ipcMain.handle('start-capture', async (event, settings) => {
     // 👇 [추가] 핸들러 호출 로그
-    sendLogToUI('IPC 핸들러 "start-capture" 수신. 설정: ' + JSON.stringify(settings));
+    sendLogToUI('IPCハンドラ"start-capture"受信。設定: ' + JSON.stringify(settings));
     try {
         // 👇 [추가] Axios 호출 직전 로그
-        sendLogToUI(`Axios POST 요청 전송 시도: ${LOCAL_FLASK_API}/start`);
+        sendLogToUI(`Axios POSTリクエスト送信試行: ${LOCAL_FLASK_API}/start`);
         const response = await axios_1.default.post(`${LOCAL_FLASK_API}/start`, settings);
         // 👇 [추가] Axios 응답 성공 로그
-        sendLogToUI(`Axios 응답 성공 (${response.status}): ${JSON.stringify(response.data)}`);
+        sendLogToUI(`Axios 応答成功 (${response.status}): ${JSON.stringify(response.data)}`);
         return { success: true, message: response.data.message };
     }
     catch (error) {
         // 👇 [수정] Axios 오류 상세 로그
-        let errorMessage = '알 수 없는 오류';
+        let errorMessage = '不明なエラー';
         if (axios_1.default.isAxiosError(error)) { // Axios 오류인지 확인
             errorMessage = error.message;
             if (error.response) {
                 // 서버가 오류 응답을 반환한 경우 (4xx, 5xx)
-                errorMessage += ` | 서버 응답 (${error.response.status}): ${JSON.stringify(error.response.data)}`;
+                errorMessage += ` | サーバー応答 (${error.response.status}): ${JSON.stringify(error.response.data)}`;
             }
             else if (error.request) {
                 // 요청은 보냈으나 응답을 받지 못한 경우 (네트워크 오류, 서버 다운 등)
-                errorMessage += ' | 서버로부터 응답을 받지 못했습니다. Flask 서버(app.py)가 실행 중인지 확인하세요.';
+                errorMessage += ' | サーバーからの応答がありません。Flaskサーバー(app.py)が実行中か確認してください。';
             }
         }
         else if (error instanceof Error) {
             errorMessage = error.message;
         }
-        sendLogToUI(`[오류] Axios POST 요청 실패: ${errorMessage}`); // 상세 오류 로그 UI 전송
+        sendLogToUI(`[エラー] Axios POSTリクエスト失敗: ${errorMessage}`); // 상세 오류 로그 UI 전송
         console.error('[IPC Error] Start Capture:', error); // 콘솔에도 전체 오류 출력
         return { success: false, message: errorMessage }; // UI에도 오류 메시지 전달
     }
@@ -11003,14 +11003,14 @@ electron_1.ipcMain.handle('settings:write', async (event, settings) => {
                 await promises_1.default.writeFile(uploaderConfigPath, JSON.stringify(nextUploaderCfg, null, 2), 'utf8'); // [수정] uploaderConfigPath 사용
             }
             catch (e) {
-                sendLogToUI(`[오류] uploader_config.json 업데이트 실패: ${getErrorMessage(e)}`);
+                sendLogToUI(`[エラー] uploader_config.jsonの更新に失敗しました: ${getErrorMessage(e)}`);
             }
         }
-        sendLogToUI('설정 저장됨.');
+        sendLogToUI('設定が保存されました。');
         return { success: true };
     }
     catch (error) {
-        sendLogToUI(`[오류] 설정 파일 쓰기 실패: ${getErrorMessage(error)}`);
+        sendLogToUI(`[エラー] 設定ファイルの書き込みに失敗しました: ${getErrorMessage(error)}`);
         return { success: false, error: getErrorMessage(error) };
     }
 });
@@ -11042,7 +11042,7 @@ electron_1.ipcMain.handle('stats:get', async () => {
         }
         else {
             // [추가] 폴더 없을 시 로그
-            sendLogToUI(`[정보] 스크린샷 폴더 없음: ${screenshotPath}`);
+            sendLogToUI(`［情報］スクリーンショットフォルダーなし: ${screenshotPath}`);
         }
         // uploadedPath (전역 변수) 접근 확인
         if (fs_1.default.existsSync(uploadedPath)) {
@@ -11052,11 +11052,11 @@ electron_1.ipcMain.handle('stats:get', async () => {
         }
         else {
             // [추가] 폴더 없을 시 로그
-            sendLogToUI(`[정보] 업로드 폴더 없음: ${uploadedPath}`);
+            sendLogToUI(`［情報］アップロードフォルダーなし: ${uploadedPath}`);
         }
     }
     catch (error) {
-        sendLogToUI(`[오류] 통계 계산 실패: ${getErrorMessage(error)}`);
+        sendLogToUI(`[エラー] 統計計算失敗: ${getErrorMessage(error)}`);
     }
     return stats;
 });
@@ -11096,11 +11096,11 @@ electron_1.ipcMain.handle('screenshots:list', async (event, limit = 4) => {
         }
         else {
             // [추가] 폴더 없을 시 로그
-            sendLogToUI(`[정보] 스크린샷 폴더 없음 (목록): ${screenshotPath}`);
+            sendLogToUI(`[情報] スクリーンショットフォルダーなし (一覧): ${screenshotPath}`);
         }
     }
     catch (error) {
-        sendLogToUI(`[오류] 스크린샷 목록 생성 실패: ${getErrorMessage(error)}`);
+        sendLogToUI(`[エラー] スクリーンショット一覧の生成に失敗しました: ${getErrorMessage(error)}`);
     }
     return results;
 });
