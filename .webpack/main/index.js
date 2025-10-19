@@ -10735,10 +10735,10 @@ const LOCAL_FLASK_API = 'http://localhost:5001';
 const CONFIG_FILE_PATH = path_1.default.join(resourcesPath, 'uploader_config.json');
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
-        height: 800,
-        width: 1200,
+        height: 950,
+        width: 1300,
         webPreferences: {
-            preload: path_1.default.join(__dirname, 'preload.js'), // 👈 3.6에서 만들 파일
+            preload: 'C:\\Users\\ShirakamiCocoa\\Desktop\\JPHACKS_project\\processLog-screenshoter\\.webpack\\renderer\\main_window\\preload.js',
         },
     });
     // Vercel 앱 로드
@@ -10821,9 +10821,11 @@ const setupAuthTokenListener = () => {
 };
 // --- Electron App Lifecycle ---
 electron_1.app.on('ready', () => {
+    const chromeUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    electron_1.session.defaultSession.setUserAgent(chromeUserAgent);
     setupAuthTokenListener();
-    startPythonProcesses(); // Python 먼저 실행
-    createWindow(); // 그 다음 창 생성
+    startPythonProcesses();
+    createWindow();
 });
 electron_1.app.on('window-all-closed', () => {
     killPythonProcesses(); // 모든 창이 닫히면 Python 종료

@@ -9,6 +9,7 @@ import axios from 'axios';
 if (require('electron-squirrel-startup')) {
   app.quit();
 }
+declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 // 1. Python 자식 프로세스 참조 변수
 let appPy: ChildProcess | null = null;
@@ -33,13 +34,12 @@ const CONFIG_FILE_PATH = path.join(resourcesPath, 'uploader_config.json');
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
-    height: 800,
-    width: 1200,
+    height: 950,
+    width: 1300,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'), // 👈 3.6에서 만들 파일
+      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
     },
   });
-
   // Vercel 앱 로드
   mainWindow.loadURL(UI_URL);
 
@@ -123,11 +123,13 @@ const setupAuthTokenListener = () => {
 // --- Electron App Lifecycle ---
 
 app.on('ready', () => {
-    setupAuthTokenListener();
-  startPythonProcesses(); // Python 먼저 실행
-  createWindow();         // 그 다음 창 생성
-});
+  const chromeUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  session.defaultSession.setUserAgent(chromeUserAgent);
 
+  setupAuthTokenListener();
+  startPythonProcesses();
+  createWindow();
+});
 app.on('window-all-closed', () => { //쿠키 리스너 시작
   killPythonProcesses(); // 모든 창이 닫히면 Python 종료
   if (process.platform !== 'darwin') {
