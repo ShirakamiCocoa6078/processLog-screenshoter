@@ -18,7 +18,7 @@ CONFIG_FILE = os.path.join(BASE_DIR, 'uploader_config.json')
 # ★ 4단계에서 완성될 Vercel API 주소
 VERCEL_API_URL = "https://process-log.vercel.app/api/diff" # (실제 배포 주소로 변경)
 
-UPLOAD_INTERVAL_SECONDS = 10 # 10초마다 폴더 확인
+UPLOAD_INTERVAL_SECONDS = 2 # 10초마다 폴더 확인
 BATCH_SIZE = 2             # 2개씩 묶어 전송
 
 # --- 설정 읽기 ---
