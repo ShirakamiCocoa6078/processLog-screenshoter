@@ -18,7 +18,7 @@ CONFIG_FILE = os.path.join(BASE_DIR, 'uploader_config.json')
 # ★ 4단계에서 완성될 Vercel API 주소
 VERCEL_API_URL = "https://process-log.vercel.app/api/diff" # (실제 배포 주소로 변경)
 
-UPLOAD_INTERVAL_SECONDS = 2 # 10초마다 폴더 확인
+UPLOAD_INTERVAL_SECONDS = 5 # 10초마다 폴더 확인
 BATCH_SIZE = 2             # 2개씩 묶어 전송
 
 # --- 설정 읽기 ---
@@ -89,8 +89,9 @@ def send_screenshots(filepaths, auth_token, user_email):
 def job():
     print(f"[{time.strftime('%H:%M:%S')}] 업로드 작업 실행...")
     
-    auth_token, user_email = get_config()
-    
+    auth_token = None
+    user_email = None
+    should_delete = False
     # 4단계: 인증 토큰이 없으면 Electron이 아직 준비되지 않은 것
     if not auth_token:
         print("인증 토큰을 찾을 수 없습니다. (로그인 대기 중)")
@@ -110,16 +111,27 @@ def job():
 
         if len(full_paths) >= BATCH_SIZE:
             files_to_send = full_paths[:BATCH_SIZE]
-            
+
             if send_screenshots(files_to_send, auth_token, user_email):
                 # 전송 성공 시 'uploaded' 폴더로 이동
-                for path in files_to_send:
-                    try:
-                        shutil.move(path, os.path.join(UPLOADED_DIR, os.path.basename(path)))
-                    except Exception as e:
-                        print(f"파일 이동 오류: {e}")
-            # (Q1 답변: 전송 실패 시(False 반환) 아무것도 하지 않고, 파일은 다음 job에서 재시도됨)
-            
+                if should_delete:
+                    # 삭제 로직
+                    for path in files_to_send:
+                        try:
+                            os.remove(path)
+                            print(f"삭제 완료: {path}")
+                        except Exception as e:
+                            print(f"삭제 실패: {path} - {e}")
+                else:
+                        # 이동 로직
+                    for path in files_to_send:
+                        try:
+                            shutil.move(path, os.path.join(UPLOADED_DIR, os.path.basename(path)))
+                            print(f"이동 완료: {path} -> {UPLOADED_DIR}") # 이동 경로 명확히
+                        except Exception as e:
+                            print(f"이동 실패: {path} - {e}")
+            else:
+                print("전송 실패. 파일 처리 안 함.") # 메시지 수정
         else:
             print(f"전송 대기 파일 부족 (현재: {len(full_paths)}개)")
             

@@ -10710,45 +10710,68 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const electron_1 = __webpack_require__(/*! electron */ "electron");
 const path_1 = __importDefault(__webpack_require__(/*! path */ "path"));
 const fs_1 = __importDefault(__webpack_require__(/*! fs */ "fs"));
-const promises_1 = __importDefault(__webpack_require__(/*! fs/promises */ "fs/promises"));
+const promises_1 = __importDefault(__webpack_require__(/*! fs/promises */ "fs/promises")); // Async 파일 시스템 API
 const child_process_1 = __webpack_require__(/*! child_process */ "child_process");
 const axios_1 = __importDefault(__webpack_require__(/*! axios */ "./node_modules/axios/dist/node/axios.cjs"));
 // Squirrel 업데이트 핸들러 (Windows 설치용)
 if (__webpack_require__(/*! electron-squirrel-startup */ "./node_modules/electron-squirrel-startup/index.js")) {
     electron_1.app.quit();
 }
-// 1. Python 자식 프로세스 참조 변수
-let appPy = null;
-let uploaderPy = null;
-// 2. Python 스크립트 실행 경로
-// __dirname은 .webpack/main/index.js의 위치가 됩니다.
-// process.resourcesPath는 배포 시 'resources' 폴더를 가리킵니다.
+// --- 전역 변수 및 경로 정의 ---
 const isDev = !electron_1.app.isPackaged;
 const resourcesPath = isDev
     ? path_1.default.join(__dirname, '../../') // 개발: 프로젝트 루트
     : process.resourcesPath; // 배포: resources 폴더
+// 1. Python 자식 프로세스 참조 변수
+let appPy = null;
+let uploaderPy = null;
+let mainWindowRef = null; // mainWindow 참조 저장
+// 2. Python 스크립트 실행 경로
 const pythonPath = isDev ? 'python' : path_1.default.join(resourcesPath, 'venv', 'python.exe'); // (배포 시 venv 경로)
 const appPyPath = path_1.default.join(resourcesPath, 'backend', 'app.py');
 const uploaderPyPath = path_1.default.join(resourcesPath, 'backend', 'uploader.py');
+// 3. UI 로드 URL 및 API
+const UI_URL = 'https://process-log.vercel.app';
+const LOCAL_FLASK_API = 'http://localhost:5001';
+// 4. 파일 및 폴더 이름
 const SETTINGS_FILE_NAME = 'user-settings.json';
 const SCREENSHOT_FOLDER = 'screenshot';
 const UPLOADED_SUBFOLDER = 'uploaded';
-// 3. UI 로드 URL (1단계에서 만든 Vercel 서버)
-const UI_URL = 'https://process-log.vercel.app';
-const LOCAL_FLASK_API = 'http://localhost:5001';
-const CONFIG_FILE_PATH = path_1.default.join(resourcesPath, 'uploader_config.json');
+// 5. [수정] 동적 경로 정의
+// 사용자 데이터 폴더 내 설정 파일 경로 (app.getPath 사용 보장)
+const userSettingsPath = path_1.default.join(electron_1.app.getPath('userData'), SETTINGS_FILE_NAME);
+// 프로젝트 루트 내 스크린샷 폴더 경로
+const screenshotPath = path_1.default.join(resourcesPath, SCREENSHOT_FOLDER);
+const uploadedPath = path_1.default.join(screenshotPath, UPLOADED_SUBFOLDER);
+// 프로젝트 루트 내 업로더 설정 파일 경로
+const uploaderConfigPath = path_1.default.join(resourcesPath, 'uploader_config.json'); // CONFIG_FILE_PATH -> uploaderConfigPath
 const defaultSettings = {
     interval: 5, // 초 단위
     resolution: '1.0', // 문자열
     deleteAfterUpload: false,
 };
-let mainWindowRef = null; // mainWindow 참조 저장
+// --- 유틸리티 함수 ---
 const sendLogToUI = (message) => {
     if (mainWindowRef && !mainWindowRef.isDestroyed()) {
         mainWindowRef.webContents.send('log-message', `[${new Date().toLocaleTimeString()}] ${message}`);
     }
     console.log(`[LOG] ${message}`); // 메인 프로세스 콘솔에도 출력
 };
+// [추가] 설정을 읽는 별도 함수
+async function readSettings() {
+    try {
+        if (fs_1.default.existsSync(userSettingsPath)) {
+            const content = await promises_1.default.readFile(userSettingsPath, 'utf8');
+            // 기본값과 병합하여 반환 (누락된 키 방지)
+            return { ...defaultSettings, ...JSON.parse(content) };
+        }
+    }
+    catch (error) {
+        sendLogToUI(`[오류] 설정 파일 읽기 실패: ${error.message}`);
+    }
+    return defaultSettings; // 실패 시 기본값 반환
+}
+// --- createWindow 함수 ---
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
         height: 950,
@@ -10765,21 +10788,43 @@ const createWindow = () => {
         mainWindow.webContents.openDevTools();
     }
 };
-// 4. Python 프로세스 실행
+// --- Python 프로세스 관리 ---
+// Python 프로세스 실행
 const startPythonProcesses = () => {
-    console.log('Starting Python processes...');
-    console.log('App.py Path:', appPyPath);
-    console.log('Uploader.py Path:', uploaderPyPath);
-    // (1) 캡처 서버 (app.py) 실행
-    appPy = (0, child_process_1.spawn)(pythonPath, [appPyPath]);
-    appPy.stdout.on('data', (data) => console.log(`[App.py]: ${data}`));
-    appPy.stderr.on('data', (data) => console.error(`[App.py ERR]: ${data}`));
-    // (2) 업로더 (uploader.py) 실행
-    uploaderPy = (0, child_process_1.spawn)(pythonPath, [uploaderPyPath]);
-    uploaderPy.stdout.on('data', (data) => console.log(`[Uploader.py]: ${data}`));
-    uploaderPy.stderr.on('data', (data) => console.error(`[Uploader.py ERR]: ${data}`));
+    sendLogToUI('Starting Python processes...');
+    // console.log('App.py Path:', appPyPath);
+    // console.log('Uploader.py Path:', uploaderPyPath);
+    try { // [추가] spawn 자체에서 오류가 발생할 수 있으므로 try...catch 추가
+        // (1) 캡처 서버 (app.py) 실행
+        appPy = (0, child_process_1.spawn)(pythonPath, [appPyPath]);
+        if (appPy) {
+            appPy.stdout.on('data', (data) => sendLogToUI(`[App.py]: ${data.toString().trim()}`));
+            appPy.stderr.on('data', (data) => sendLogToUI(`[App.py ERR]: ${data.toString().trim()}`));
+            appPy.on('close', (code) => sendLogToUI(`App.py 종료됨 (코드: ${code})`));
+            appPy.on('error', (err) => sendLogToUI(`[App.py SPAWN ERR]: ${err.message}`)); // [추가] spawn 오류 처리
+        }
+        else {
+            sendLogToUI('[오류] App.py 프로세스를 시작하지 못했습니다.');
+        }
+        // (2) 업로더 (uploader.py) 실행
+        uploaderPy = (0, child_process_1.spawn)(pythonPath, [uploaderPyPath]);
+        if (uploaderPy) {
+            uploaderPy.stdout.on('data', (data) => sendLogToUI(`[Uploader.py]: ${data.toString().trim()}`));
+            uploaderPy.stderr.on('data', (data) => sendLogToUI(`[Uploader.py ERR]: ${data.toString().trim()}`));
+            uploaderPy.on('close', (code) => sendLogToUI(`Uploader.py 종료됨 (코드: ${code})`));
+            uploaderPy.on('error', (err) => sendLogToUI(`[Uploader.py SPAWN ERR]: ${err.message}`)); // [추가] spawn 오류 처리
+        }
+        else {
+            sendLogToUI('[오류] Uploader.py 프로세스를 시작하지 못했습니다.');
+        }
+    }
+    catch (error) { // [추가] spawn 자체 오류 처리
+        sendLogToUI(`[오류] Python 프로세스 spawn 실패: ${error.message}`);
+        appPy = null; // 오류 발생 시 null로 확실히 설정
+        uploaderPy = null;
+    }
 };
-// 5. Python 프로세스 종료
+// Python 프로세스 종료
 const killPythonProcesses = () => {
     console.log('Stopping Python processes...');
     if (appPy)
@@ -10787,13 +10832,15 @@ const killPythonProcesses = () => {
     if (uploaderPy)
         uploaderPy.kill();
 };
+// --- 인증 토큰 관리 ---
 const updateUploaderConfig = (token, email) => {
     try {
         const config = {
             sessionToken: token,
             userEmail: email,
         };
-        fs_1.default.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(config, null, 2));
+        // [수정] uploaderConfigPath 사용
+        fs_1.default.writeFileSync(uploaderConfigPath, JSON.stringify(config, null, 2));
         if (token) {
             console.log('[Auth] uploader_config.json에 세션 토큰 저장 성공.');
         }
@@ -10807,11 +10854,12 @@ const updateUploaderConfig = (token, email) => {
 };
 const setupAuthTokenListener = () => {
     // Vercel 도메인에 대한 쿠키만 감시
+    // 우리가 찾는 쿠키 이름
+    const AUTH_COOKIE_NAME = '__Secure-next-auth.session-token';
+    // (Vercel 배포 시 __Secure- 접두사가 붙습니다. 로컬 테스트 시 'next-auth.session-token')
+    const LOCAL_AUTH_COOKIE_NAME = 'next-auth.session-token';
     const filter = { urls: [UI_URL + '/*'] };
     electron_1.session.defaultSession.cookies.on('changed', async (event, cookie, cause, removed) => {
-        // 우리가 찾는 쿠키 이름
-        const AUTH_COOKIE_NAME = '__Secure-next-auth.session-token';
-        // (Vercel 배포 시 __Secure- 접두사가 붙습니다. 로컬 테스트 시 'next-auth.session-token')
         if (cookie.name === AUTH_COOKIE_NAME || cookie.name === 'next-auth.session-token') {
             if (removed || cause === 'expired') {
                 // 로그아웃 또는 만료
@@ -10826,21 +10874,29 @@ const setupAuthTokenListener = () => {
         }
     });
     (async () => {
-        const cookies = await electron_1.session.defaultSession.cookies.get({ url: UI_URL });
-        const authToken = cookies.find(c => c.name === AUTH_COOKIE_NAME || c.name === 'next-auth.session-token');
-        if (authToken) {
-            updateUploaderConfig(authToken.value, null);
+        try { // [추가] 오류 처리를 위해 try...catch 추가
+            const cookies = await electron_1.session.defaultSession.cookies.get({ url: UI_URL });
+            // 👇 [수정] 함수 최상단에 정의된 상수 사용
+            const authToken = cookies.find(c => c.name === AUTH_COOKIE_NAME || c.name === LOCAL_AUTH_COOKIE_NAME);
+            if (authToken) {
+                updateUploaderConfig(authToken.value, null);
+            }
+            else {
+                updateUploaderConfig(null, null); // 초기화
+            }
         }
-        else {
-            updateUploaderConfig(null, null); // 초기화
+        catch (error) { // [추가] 쿠키 읽기 오류 처리
+            sendLogToUI(`[오류] 초기 쿠키 확인 실패: ${error.message}`);
+            updateUploaderConfig(null, null); // 오류 시에도 초기화
         }
     })();
 };
 // --- Electron App Lifecycle ---
 electron_1.app.on('ready', () => {
+    // UserAgent 설정 (Google 로그인용)
     const chromeUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     electron_1.session.defaultSession.setUserAgent(chromeUserAgent);
-    setupAuthTokenListener();
+    setupAuthTokenListener(); //쿠키 리스너 시작
     startPythonProcesses();
     createWindow();
 });
@@ -10855,16 +10911,40 @@ electron_1.app.on('activate', () => {
         createWindow();
     }
 });
-// --- 6. IPC 핸들러 (UI -> Main) ---
+// --- IPC 핸들러 (UI -> Main) ---
+// 캡처 시작 요청 (UI -> Main -> app.py)
 // 캡처 시작 요청 (UI -> Main -> app.py)
 electron_1.ipcMain.handle('start-capture', async (event, settings) => {
+    // 👇 [추가] 핸들러 호출 로그
+    sendLogToUI('IPC 핸들러 "start-capture" 수신. 설정: ' + JSON.stringify(settings));
     try {
+        // 👇 [추가] Axios 호출 직전 로그
+        sendLogToUI(`Axios POST 요청 전송 시도: ${LOCAL_FLASK_API}/start`);
         const response = await axios_1.default.post(`${LOCAL_FLASK_API}/start`, settings);
+        // 👇 [추가] Axios 응답 성공 로그
+        sendLogToUI(`Axios 응답 성공 (${response.status}): ${JSON.stringify(response.data)}`);
         return { success: true, message: response.data.message };
     }
     catch (error) {
-        console.error('[IPC Error] Start Capture:', error.message);
-        return { success: false, message: error.response?.data?.message || error.message };
+        // 👇 [수정] Axios 오류 상세 로그
+        let errorMessage = '알 수 없는 오류';
+        if (axios_1.default.isAxiosError(error)) { // Axios 오류인지 확인
+            errorMessage = error.message;
+            if (error.response) {
+                // 서버가 오류 응답을 반환한 경우 (4xx, 5xx)
+                errorMessage += ` | 서버 응답 (${error.response.status}): ${JSON.stringify(error.response.data)}`;
+            }
+            else if (error.request) {
+                // 요청은 보냈으나 응답을 받지 못한 경우 (네트워크 오류, 서버 다운 등)
+                errorMessage += ' | 서버로부터 응답을 받지 못했습니다. Flask 서버(app.py)가 실행 중인지 확인하세요.';
+            }
+        }
+        else if (error instanceof Error) {
+            errorMessage = error.message;
+        }
+        sendLogToUI(`[오류] Axios POST 요청 실패: ${errorMessage}`); // 상세 오류 로그 UI 전송
+        console.error('[IPC Error] Start Capture:', error); // 콘솔에도 전체 오류 출력
+        return { success: false, message: errorMessage }; // UI에도 오류 메시지 전달
     }
 });
 // 캡처 중지 요청 (UI -> Main -> app.py)
@@ -10878,37 +10958,28 @@ electron_1.ipcMain.handle('stop-capture', async () => {
         return { success: false, message: error.response?.data?.message || error.message };
     }
 });
-// 설정 읽기 핸들러
+// [수정] 설정 읽기 핸들러 (별도 함수 호출)
 electron_1.ipcMain.handle('settings:read', async () => {
-    try {
-        if (fs_1.default.existsSync(userSettingsPath)) {
-            const content = await promises_1.default.readFile(userSettingsPath, 'utf8');
-            return { ...defaultSettings, ...JSON.parse(content) };
-        }
-    }
-    catch (error) {
-        sendLogToUI(`[오류] 설정 파일 읽기 실패: ${error.message}`);
-    }
-    return defaultSettings; // 실패 시 기본값 반환
+    return await readSettings();
 });
-// 설정 쓰기 핸들러
+// [수정] 설정 쓰기 핸들러 (별도 함수 호출)
 electron_1.ipcMain.handle('settings:write', async (event, settings) => {
     try {
-        const currentSettings = await electron_1.ipcMain.invoke('settings:read'); // 현재 설정 읽기
+        const currentSettings = await readSettings(); // 수정된 readSettings 함수 사용
         const newSettings = { ...currentSettings, ...settings }; // 병합
         await promises_1.default.writeFile(userSettingsPath, JSON.stringify(newSettings, null, 2), 'utf8');
-        // uploader_config.json에도 deleteAfterUpload 반영 (구 프로젝트 로직)
+        // uploader_config.json에도 deleteAfterUpload 반영
         if (typeof settings.deleteAfterUpload === 'boolean') {
             try {
                 let uploaderCfg = {};
-                if (fs_1.default.existsSync(uploaderConfigPath)) {
+                if (fs_1.default.existsSync(uploaderConfigPath)) { // [수정] uploaderConfigPath 사용
                     try {
-                        uploaderCfg = JSON.parse(await promises_1.default.readFile(uploaderConfigPath, 'utf-8'));
+                        uploaderCfg = JSON.parse(await promises_1.default.readFile(uploaderConfigPath, 'utf-8')); // [수정] uploaderConfigPath 사용
                     }
                     catch { /*무시*/ }
                 }
                 const nextUploaderCfg = { ...uploaderCfg, deleteAfterUpload: settings.deleteAfterUpload };
-                await promises_1.default.writeFile(uploaderConfigPath, JSON.stringify(nextUploaderCfg, null, 2), 'utf8');
+                await promises_1.default.writeFile(uploaderConfigPath, JSON.stringify(nextUploaderCfg, null, 2), 'utf8'); // [수정] uploaderConfigPath 사용
             }
             catch (e) {
                 sendLogToUI(`[오류] uploader_config.json 업데이트 실패: ${e.message}`);
@@ -10922,7 +10993,7 @@ electron_1.ipcMain.handle('settings:write', async (event, settings) => {
         return { success: false, error: error.message };
     }
 });
-// 통계 가져오기 핸들러
+// [수정] 통계 가져오기 핸들러
 electron_1.ipcMain.handle('stats:get', async () => {
     const stats = {
         totalShots: 0,
@@ -10930,11 +11001,12 @@ electron_1.ipcMain.handle('stats:get', async () => {
         uploadedCount: 0,
     };
     try {
-        // screenshot 폴더 스캔
+        // screenshotPath (전역 변수) 접근 확인
         if (fs_1.default.existsSync(screenshotPath)) {
             const files = await promises_1.default.readdir(screenshotPath);
             for (const file of files) {
-                if (file.toLowerCase().endsWith('.png')) {
+                // [수정] uploaded 폴더 자체 제외
+                if (file.toLowerCase().endsWith('.png') && file !== UPLOADED_SUBFOLDER) {
                     const filePath = path_1.default.join(screenshotPath, file);
                     try {
                         const fileStat = await promises_1.default.stat(filePath);
@@ -10947,14 +11019,19 @@ electron_1.ipcMain.handle('stats:get', async () => {
                 }
             }
         }
-        // uploaded 폴더 스캔
+        else {
+            // [추가] 폴더 없을 시 로그
+            sendLogToUI(`[정보] 스크린샷 폴더 없음: ${screenshotPath}`);
+        }
+        // uploadedPath (전역 변수) 접근 확인
         if (fs_1.default.existsSync(uploadedPath)) {
             const uploadedFiles = await promises_1.default.readdir(uploadedPath);
-            for (const file of uploadedFiles) {
-                if (file.toLowerCase().endsWith('.png')) {
-                    stats.uploadedCount++;
-                }
-            }
+            // [수정] filter로 변경
+            stats.uploadedCount = uploadedFiles.filter(f => f.toLowerCase().endsWith('.png')).length;
+        }
+        else {
+            // [추가] 폴더 없을 시 로그
+            sendLogToUI(`[정보] 업로드 폴더 없음: ${uploadedPath}`);
         }
     }
     catch (error) {
@@ -10962,15 +11039,17 @@ electron_1.ipcMain.handle('stats:get', async () => {
     }
     return stats;
 });
-// 스크린샷 목록 핸들러 (Data URL 반환)
+// [수정] 스크린샷 목록 핸들러 (Data URL 반환)
 electron_1.ipcMain.handle('screenshots:list', async (event, limit = 4) => {
     const results = [];
     try {
+        // screenshotPath (전역 변수) 접근 확인
         if (fs_1.default.existsSync(screenshotPath)) {
             const files = await promises_1.default.readdir(screenshotPath);
             const pngFiles = [];
             for (const file of files) {
-                if (file.toLowerCase().endsWith('.png')) {
+                // [수정] uploaded 폴더 자체 제외
+                if (file.toLowerCase().endsWith('.png') && file !== UPLOADED_SUBFOLDER) {
                     const filePath = path_1.default.join(screenshotPath, file);
                     try {
                         const stat = await promises_1.default.stat(filePath);
@@ -10993,6 +11072,10 @@ electron_1.ipcMain.handle('screenshots:list', async (event, limit = 4) => {
                 }
                 catch { /* 파일 읽기 오류 무시 */ }
             }
+        }
+        else {
+            // [추가] 폴더 없을 시 로그
+            sendLogToUI(`[정보] 스크린샷 폴더 없음 (목록): ${screenshotPath}`);
         }
     }
     catch (error) {
