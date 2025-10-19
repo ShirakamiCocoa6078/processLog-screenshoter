@@ -1,17 +1,52 @@
 // src/preload.ts
 import { contextBridge, ipcRenderer } from 'electron';
 
-// UI(Window)에서 접근할 수 있는 'electronAPI' 객체를 노출
-contextBridge.exposeInMainWorld('electronAPI', {
-  // Main 프로세스의 'start-capture' 핸들러 호출
-  startCapture: (settings: { interval: number; resolution: number }) => 
-    ipcRenderer.invoke('start-capture', settings),
+// 구 프로젝트의 설정을 위한 타입
+type SettingsData = {
+  interval?: number;
+  resolution?: number | string; // 구 프로젝트는 string도 가능했음
+  deleteAfterUpload?: boolean;
+  // (statusText, isRecording은 UI 상태이므로 여기서 제외)
+};
 
-  // Main 프로세스의 'stop-capture' 핸들러 호출
-  stopCapture: () => 
+// 통계 데이터 타입
+type StatsData = {
+  totalShots: number; // screenshot/ 폴더 내 .png 개수
+  totalSize: number;  // screenshot/ 폴더 내 .png 총 크기 (bytes)
+  uploadedCount: number; // screenshot/uploaded/ 폴더 내 .png 개수 (구: deletedCount)
+};
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  // --- 기존 함수 ---
+  startCapture: (settings: { interval: number; resolution: number }) =>
+    ipcRenderer.invoke('start-capture', settings),
+  stopCapture: () =>
     ipcRenderer.invoke('stop-capture'),
 
-  // (4단계 연동) UI가 토큰을 Main 프로세스로 전송
-  setAuthToken: (token: string, email: string) => 
-    ipcRenderer.send('set-auth-token', token, email),
+  // --- 👇 [추가] ---
+
+  // 설정 읽기
+  readSettings: (): Promise<SettingsData> => ipcRenderer.invoke('settings:read'),
+
+  // 설정 쓰기
+  writeSettings: (settings: SettingsData): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('settings:write', settings),
+
+  // 통계 가져오기
+  getStats: (): Promise<StatsData> => ipcRenderer.invoke('stats:get'),
+
+  // 최근 스크린샷 목록 (Data URL 배열) 가져오기
+  listScreenshots: (limit?: number): Promise<string[]> => ipcRenderer.invoke('screenshots:list', limit),
+
+  // 창 닫기
+  closeWindow: (): Promise<void> => ipcRenderer.invoke('window:close'),
+
+  // Main 프로세스로부터 로그 메시지를 받을 리스너 등록
+  // 사용법: window.electronAPI.onLogMessage((message) => { console.log(message); });
+  onLogMessage: (callback: (message: string) => void) => {
+    const listener = (event, message) => callback(message);
+    ipcRenderer.on('log-message', listener);
+    // 클린업 함수 반환
+    return () => ipcRenderer.removeListener('log-message', listener);
+  },
 });

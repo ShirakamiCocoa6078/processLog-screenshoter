@@ -10710,6 +10710,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const electron_1 = __webpack_require__(/*! electron */ "electron");
 const path_1 = __importDefault(__webpack_require__(/*! path */ "path"));
 const fs_1 = __importDefault(__webpack_require__(/*! fs */ "fs"));
+const promises_1 = __importDefault(__webpack_require__(/*! fs/promises */ "fs/promises"));
 const child_process_1 = __webpack_require__(/*! child_process */ "child_process");
 const axios_1 = __importDefault(__webpack_require__(/*! axios */ "./node_modules/axios/dist/node/axios.cjs"));
 // Squirrel 업데이트 핸들러 (Windows 설치용)
@@ -10729,10 +10730,25 @@ const resourcesPath = isDev
 const pythonPath = isDev ? 'python' : path_1.default.join(resourcesPath, 'venv', 'python.exe'); // (배포 시 venv 경로)
 const appPyPath = path_1.default.join(resourcesPath, 'backend', 'app.py');
 const uploaderPyPath = path_1.default.join(resourcesPath, 'backend', 'uploader.py');
+const SETTINGS_FILE_NAME = 'user-settings.json';
+const SCREENSHOT_FOLDER = 'screenshot';
+const UPLOADED_SUBFOLDER = 'uploaded';
 // 3. UI 로드 URL (1단계에서 만든 Vercel 서버)
 const UI_URL = 'https://process-log.vercel.app';
 const LOCAL_FLASK_API = 'http://localhost:5001';
 const CONFIG_FILE_PATH = path_1.default.join(resourcesPath, 'uploader_config.json');
+const defaultSettings = {
+    interval: 5, // 초 단위
+    resolution: '1.0', // 문자열
+    deleteAfterUpload: false,
+};
+let mainWindowRef = null; // mainWindow 참조 저장
+const sendLogToUI = (message) => {
+    if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+        mainWindowRef.webContents.send('log-message', `[${new Date().toLocaleTimeString()}] ${message}`);
+    }
+    console.log(`[LOG] ${message}`); // 메인 프로세스 콘솔에도 출력
+};
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
         height: 950,
@@ -10741,6 +10757,7 @@ const createWindow = () => {
             preload: 'C:\\Users\\ShirakamiCocoa\\Desktop\\JPHACKS_project\\processLog-screenshoter\\.webpack\\renderer\\main_window\\preload.js',
         },
     });
+    mainWindowRef = mainWindow;
     // Vercel 앱 로드
     mainWindow.loadURL(UI_URL);
     // (선택) 개발자 도구 열기
@@ -10861,6 +10878,135 @@ electron_1.ipcMain.handle('stop-capture', async () => {
         return { success: false, message: error.response?.data?.message || error.message };
     }
 });
+// 설정 읽기 핸들러
+electron_1.ipcMain.handle('settings:read', async () => {
+    try {
+        if (fs_1.default.existsSync(userSettingsPath)) {
+            const content = await promises_1.default.readFile(userSettingsPath, 'utf8');
+            return { ...defaultSettings, ...JSON.parse(content) };
+        }
+    }
+    catch (error) {
+        sendLogToUI(`[오류] 설정 파일 읽기 실패: ${error.message}`);
+    }
+    return defaultSettings; // 실패 시 기본값 반환
+});
+// 설정 쓰기 핸들러
+electron_1.ipcMain.handle('settings:write', async (event, settings) => {
+    try {
+        const currentSettings = await electron_1.ipcMain.invoke('settings:read'); // 현재 설정 읽기
+        const newSettings = { ...currentSettings, ...settings }; // 병합
+        await promises_1.default.writeFile(userSettingsPath, JSON.stringify(newSettings, null, 2), 'utf8');
+        // uploader_config.json에도 deleteAfterUpload 반영 (구 프로젝트 로직)
+        if (typeof settings.deleteAfterUpload === 'boolean') {
+            try {
+                let uploaderCfg = {};
+                if (fs_1.default.existsSync(uploaderConfigPath)) {
+                    try {
+                        uploaderCfg = JSON.parse(await promises_1.default.readFile(uploaderConfigPath, 'utf-8'));
+                    }
+                    catch { /*무시*/ }
+                }
+                const nextUploaderCfg = { ...uploaderCfg, deleteAfterUpload: settings.deleteAfterUpload };
+                await promises_1.default.writeFile(uploaderConfigPath, JSON.stringify(nextUploaderCfg, null, 2), 'utf8');
+            }
+            catch (e) {
+                sendLogToUI(`[오류] uploader_config.json 업데이트 실패: ${e.message}`);
+            }
+        }
+        sendLogToUI('설정 저장됨.');
+        return { success: true };
+    }
+    catch (error) {
+        sendLogToUI(`[오류] 설정 파일 쓰기 실패: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+});
+// 통계 가져오기 핸들러
+electron_1.ipcMain.handle('stats:get', async () => {
+    const stats = {
+        totalShots: 0,
+        totalSize: 0,
+        uploadedCount: 0,
+    };
+    try {
+        // screenshot 폴더 스캔
+        if (fs_1.default.existsSync(screenshotPath)) {
+            const files = await promises_1.default.readdir(screenshotPath);
+            for (const file of files) {
+                if (file.toLowerCase().endsWith('.png')) {
+                    const filePath = path_1.default.join(screenshotPath, file);
+                    try {
+                        const fileStat = await promises_1.default.stat(filePath);
+                        if (fileStat.isFile()) {
+                            stats.totalShots++;
+                            stats.totalSize += fileStat.size;
+                        }
+                    }
+                    catch { /* 파일 접근 오류 무시 */ }
+                }
+            }
+        }
+        // uploaded 폴더 스캔
+        if (fs_1.default.existsSync(uploadedPath)) {
+            const uploadedFiles = await promises_1.default.readdir(uploadedPath);
+            for (const file of uploadedFiles) {
+                if (file.toLowerCase().endsWith('.png')) {
+                    stats.uploadedCount++;
+                }
+            }
+        }
+    }
+    catch (error) {
+        sendLogToUI(`[오류] 통계 계산 실패: ${error.message}`);
+    }
+    return stats;
+});
+// 스크린샷 목록 핸들러 (Data URL 반환)
+electron_1.ipcMain.handle('screenshots:list', async (event, limit = 4) => {
+    const results = [];
+    try {
+        if (fs_1.default.existsSync(screenshotPath)) {
+            const files = await promises_1.default.readdir(screenshotPath);
+            const pngFiles = [];
+            for (const file of files) {
+                if (file.toLowerCase().endsWith('.png')) {
+                    const filePath = path_1.default.join(screenshotPath, file);
+                    try {
+                        const stat = await promises_1.default.stat(filePath);
+                        if (stat.isFile()) {
+                            pngFiles.push({ path: filePath, mtime: stat.mtimeMs });
+                        }
+                    }
+                    catch { /* 무시 */ }
+                }
+            }
+            // 최신순 정렬
+            pngFiles.sort((a, b) => b.mtime - a.mtime);
+            // 제한 개수만큼 읽어서 Data URL 생성
+            const latestFiles = pngFiles.slice(0, limit);
+            for (const fileInfo of latestFiles) {
+                try {
+                    const buffer = await promises_1.default.readFile(fileInfo.path);
+                    const base64 = buffer.toString('base64');
+                    results.push(`data:image/png;base64,${base64}`);
+                }
+                catch { /* 파일 읽기 오류 무시 */ }
+            }
+        }
+    }
+    catch (error) {
+        sendLogToUI(`[오류] 스크린샷 목록 생성 실패: ${error.message}`);
+    }
+    return results;
+});
+// 창 닫기 핸들러
+electron_1.ipcMain.handle('window:close', (event) => {
+    const window = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (window) {
+        window.close();
+    }
+});
 
 
 /***/ }),
@@ -10928,6 +11074,17 @@ module.exports = require("events");
 
 "use strict";
 module.exports = require("fs");
+
+/***/ }),
+
+/***/ "fs/promises":
+/*!******************************!*\
+  !*** external "fs/promises" ***!
+  \******************************/
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("fs/promises");
 
 /***/ }),
 
