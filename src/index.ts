@@ -80,8 +80,8 @@ async function readSettings(): Promise<typeof defaultSettings> {
 // --- createWindow 함수 ---
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
-    height: 950,
-    width: 1300,
+    height: 900,
+    width: 1460,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
     },

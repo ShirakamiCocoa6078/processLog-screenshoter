@@ -10774,8 +10774,8 @@ async function readSettings() {
 // --- createWindow 함수 ---
 const createWindow = () => {
     const mainWindow = new electron_1.BrowserWindow({
-        height: 950,
-        width: 1300,
+        height: 900,
+        width: 1460,
         webPreferences: {
             preload: 'C:\\Users\\ShirakamiCocoa\\Desktop\\JPHACKS_project\\processLog-screenshoter\\.webpack\\renderer\\main_window\\preload.js',
         },
