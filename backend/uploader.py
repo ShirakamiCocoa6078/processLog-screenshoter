@@ -72,12 +72,12 @@ def job():
 
         # 파일 개수가 BATCH_SIZE보다 적으면 바로 종료
         if len(all_files) < BATCH_SIZE:
-            print(f"전송 대기 파일 부족 (현재: {len(all_files)}개). 작업을 건너<0xEB><0x9A><0x8D>니다.")
+            print(f"전송 대기 파일 부족 (현재: {len(all_files)}개). 작업을 건너뜁니다.")
             return # 함수 종료
 
     except FileNotFoundError:
         # 스크린샷 폴더가 없으면 생성 시도 후 종료 (다음 실행 시 재시도)
-        print(f"스크린샷 폴더({SCREENSHOT_DIR}) 없음. 폴더 생성 시도 후 건너<0xEB><0x9A><0x8D>니다.")
+        print(f"스크린샷 폴더({SCREENSHOT_DIR}) 없음. 폴더 생성 시도 후 건너뜁니다.")
         try:
             os.makedirs(SCREENSHOT_DIR, exist_ok=True)
             os.makedirs(UPLOADED_DIR, exist_ok=True) # uploaded 폴더도 같이 생성
