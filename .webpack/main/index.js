@@ -10913,7 +10913,6 @@ electron_1.app.on('activate', () => {
 });
 // --- IPC 핸들러 (UI -> Main) ---
 // 캡처 시작 요청 (UI -> Main -> app.py)
-// 캡처 시작 요청 (UI -> Main -> app.py)
 electron_1.ipcMain.handle('start-capture', async (event, settings) => {
     // 👇 [추가] 핸들러 호출 로그
     sendLogToUI('IPC 핸들러 "start-capture" 수신. 설정: ' + JSON.stringify(settings));
